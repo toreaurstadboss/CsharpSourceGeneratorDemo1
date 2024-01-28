@@ -10,14 +10,52 @@ namespace WiredBrainCoffee.Generators;
 [Generator]
 public class ToStringGenerator : IIncrementalGenerator
 {
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var classes = context.SyntaxProvider.CreateSyntaxProvider(
-            predicate: static (node, _) => node is ClassDeclarationSyntax,
-            transform: static (ctx, _) => (ClassDeclarationSyntax)ctx.Node);
+            predicate: static (node, _) => IsSyntaxTarget(node),
+            transform: static (ctx, _) => GetSemanticTarget(ctx))
+            .Where(static target => target is not null);
 
         context.RegisterSourceOutput(classes,
-            static (ctx, source) => Execute(ctx, source));
+            static (ctx, source) => Execute(ctx, source!));
+
+        context.RegisterPostInitializationOutput(
+            static (ctx) => PostInitializationOutput(ctx));
+    }
+
+    private static ClassDeclarationSyntax? GetSemanticTarget(GeneratorSyntaxContext ctx)
+    {
+        var classDeclarationSyntax = (ClassDeclarationSyntax)ctx.Node;
+        foreach (var attributeListSyntax in classDeclarationSyntax.AttributeLists)
+        {
+            foreach (var attributeSyntax in attributeListSyntax.Attributes)
+            {
+                var attributeName = attributeSyntax.Name.ToString();
+                if (attributeName == "GenerateToString" || attributeName == "GenerateToStringAttribute")
+                {
+                    return classDeclarationSyntax;
+                }
+            }                          
+        }
+        return null;
+    }
+
+    private static bool IsSyntaxTarget(SyntaxNode node)
+    {
+        return node is ClassDeclarationSyntax classDeclarationSyntax
+            && classDeclarationSyntax.AttributeLists.Any();
+    }
+
+    private static void PostInitializationOutput(
+        IncrementalGeneratorPostInitializationContext context)
+    {
+        context.AddSource("WiredBrainCoffee.Generators.GenerateToStringAttribute.g.cs",
+            @"namespace WiredBrainCoffee.Generators
+{
+    public partial class GenerateToStringAttribute : System.Attribute { }
+}");
     }
 
     private static void Execute(SourceProductionContext context,
@@ -27,8 +65,7 @@ public class ToStringGenerator : IIncrementalGenerator
         {
             var namespaceName = ((NamespaceDeclarationSyntax)classDeclarationSyntax.Parent).Name.ToString();
             var className = classDeclarationSyntax.Identifier.Text;
-            var fileName = $"{namespaceName}{className}.g.cs";
-
+            var fileName = $"{namespaceName}.{className}.g.cs";
 
             var properties = classDeclarationSyntax.ChildNodes().OfType<PropertyDeclarationSyntax>().ToList();
 
