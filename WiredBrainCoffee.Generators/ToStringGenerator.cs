@@ -61,7 +61,7 @@ public class ToStringGenerator : IIncrementalGenerator
                     }
                     else if (propertyDeclarationSyntax.Modifiers.Any(SyntaxKind.InternalKeyword))
                     {
-
+                        sb.Append($"{propertyDeclarationSyntax.Identifier.Text}: Cannot show contents of property: it is internal");
                     }
                 }
 
