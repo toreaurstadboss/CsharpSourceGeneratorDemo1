@@ -1,22 +1,19 @@
-﻿using System;
-using System.Linq;
-using System.Text;
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.Text;
 
 namespace WiredBrainCoffee.Generators;
 
 [Generator]
 public class ToStringGenerator : IIncrementalGenerator
 {
-
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var classes = context.SyntaxProvider.CreateSyntaxProvider(
             predicate: static (node, _) => IsSyntaxTarget(node),
             transform: static (ctx, _) => GetSemanticTarget(ctx))
-            .Where(static target => target is not null);
+            .Where(static (target) => target is not null);
 
         context.RegisterSourceOutput(classes,
             static (ctx, source) => Execute(ctx, source!));
@@ -25,27 +22,32 @@ public class ToStringGenerator : IIncrementalGenerator
             static (ctx) => PostInitializationOutput(ctx));
     }
 
-    private static ClassDeclarationSyntax? GetSemanticTarget(GeneratorSyntaxContext ctx)
+    private static bool IsSyntaxTarget(SyntaxNode node)
     {
-        var classDeclarationSyntax = (ClassDeclarationSyntax)ctx.Node;
+        return node is ClassDeclarationSyntax classDeclarationSyntax
+            && classDeclarationSyntax.AttributeLists.Count > 0;
+    }
+
+    private static ClassDeclarationSyntax? GetSemanticTarget(
+        GeneratorSyntaxContext context)
+    {
+        var classDeclarationSyntax = (ClassDeclarationSyntax)context.Node;
+
         foreach (var attributeListSyntax in classDeclarationSyntax.AttributeLists)
         {
             foreach (var attributeSyntax in attributeListSyntax.Attributes)
             {
                 var attributeName = attributeSyntax.Name.ToString();
-                if (attributeName == "GenerateToString" || attributeName == "GenerateToStringAttribute")
+
+                if (attributeName == "GenerateToString"
+                    || attributeName == "GenerateToStringAttribute")
                 {
                     return classDeclarationSyntax;
                 }
-            }                          
+            }
         }
-        return null;
-    }
 
-    private static bool IsSyntaxTarget(SyntaxNode node)
-    {
-        return node is ClassDeclarationSyntax classDeclarationSyntax
-            && classDeclarationSyntax.AttributeLists.Any();
+        return null;
     }
 
     private static void PostInitializationOutput(
@@ -54,66 +56,56 @@ public class ToStringGenerator : IIncrementalGenerator
         context.AddSource("WiredBrainCoffee.Generators.GenerateToStringAttribute.g.cs",
             @"namespace WiredBrainCoffee.Generators
 {
-    public partial class GenerateToStringAttribute : System.Attribute { }
+    internal class GenerateToStringAttribute : System.Attribute { }
 }");
     }
 
     private static void Execute(SourceProductionContext context,
         ClassDeclarationSyntax classDeclarationSyntax)
     {
-        if (classDeclarationSyntax.Parent is BaseNamespaceDeclarationSyntax)
+        if (classDeclarationSyntax.Parent
+            is BaseNamespaceDeclarationSyntax namespaceDeclarationSyntax)
         {
-            var namespaceName = ((NamespaceDeclarationSyntax)classDeclarationSyntax.Parent).Name.ToString();
+            var namespaceName = namespaceDeclarationSyntax.Name.ToString();
             var className = classDeclarationSyntax.Identifier.Text;
             var fileName = $"{namespaceName}.{className}.g.cs";
 
-            var properties = classDeclarationSyntax.ChildNodes().OfType<PropertyDeclarationSyntax>().ToList();
-
-            var sb = new StringBuilder();
-            sb.Append($@"namespace {namespaceName};
+            var stringBuilder = new StringBuilder();
+            stringBuilder.Append($@"namespace {namespaceName}
+{{
     partial class {className}
     {{
-
-        public override string ToString() {{
+        public override string ToString()
+        {{
             return $""");
 
-            var first = true; 
-
-            foreach (var member in classDeclarationSyntax.Members)
+            var first = true;
+            foreach (var memberDeclarationSyntax in classDeclarationSyntax.Members)
             {
-                if (first)
+                if (memberDeclarationSyntax
+                    is PropertyDeclarationSyntax propertyDeclarationSyntax
+                    && propertyDeclarationSyntax.Modifiers.Any(SyntaxKind.PublicKeyword))
                 {
-                    first = false;
-                }
-                else
-                {
-                    sb.Append("; ");
-                }
-                if (member is PropertyDeclarationSyntax propertyDeclarationSyntax)
-                {
-                    if (propertyDeclarationSyntax.Modifiers.Any(SyntaxKind.PublicKeyword))
+                    if (first)
                     {
-
-                        sb.Append($"{propertyDeclarationSyntax.Identifier.Text}:{{{propertyDeclarationSyntax.Identifier.Text}}}");
+                        first = false;
                     }
-                    else if (propertyDeclarationSyntax.Modifiers.Any(SyntaxKind.InternalKeyword))
+                    else
                     {
-                        sb.Append($"{propertyDeclarationSyntax.Identifier.Text}: Cannot show contents of property: it is internal");
+                        stringBuilder.Append("; ");
                     }
+                    var propertyName = propertyDeclarationSyntax.Identifier.Text;
+                    stringBuilder.Append($"{propertyName}:{{{propertyName}}}");
                 }
-
             }
 
-            sb.Append($@""";
-
+            stringBuilder.Append($@""";
         }}
-
     }}
+}}
 ");
 
-
-            string createdToStringMethod = sb.ToString();
-            context.AddSource(fileName, createdToStringMethod);
+            context.AddSource(fileName, stringBuilder.ToString());
         }
     }
 }
